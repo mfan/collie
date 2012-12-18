@@ -176,7 +176,7 @@ if __name__ == "__main__":
     job.add("www.mitbbs.com", ["http://www.mitbbs.com",])
     job.add("www.patch.com", ["http://www.patch.com",])
     job.add("www.amazon.com", ["http://www.amazon.com",])
-    job.add("www.dajafa.com", ["http://www.dajafa.com",])
+#    job.add("www.dajafa.com", ["http://www.dajafa.com",])
 
     job.save()
 

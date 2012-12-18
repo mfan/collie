@@ -423,7 +423,7 @@ class Scheduler(object):
         slots = r.zrange(idle_slot_key, 0, -1)
         if not slots:
             unlock(lock_key, lock_value)
-            logger.debug("_schedule(): exit: not idle slots.")
+            logger.debug("_schedule(): exit: no idle slots.")
             return
         logger.debug("_schedule(): got %s idle slots to schedule upon" % len(slots))
 
