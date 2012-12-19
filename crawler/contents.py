@@ -1,13 +1,13 @@
 import happybase
 import urlnorm
-from .utils import url2key
+from utils import url2key
 
 CONTENT_TABLE_NAME = 'web'
 COLUMN_FAMILY_META = 'h'
 COLUMN_FAMILY_PAGE = 'p'
 COLUMN_FAMILY_XAPP = 'x'
 
-def prefix_key(prefix, dict_data): return dict("%s:%s" % (prefix, str(k)) , v)) for k, v in dict_data.iteritems())
+def prefix_key(prefix, dict_data): return dict(("%s:%s" % (prefix, str(k)) , v) for k, v in dict_data.iteritems())
 
 class ContentStore(object):
     def __init__(self, *args, **kwargs):
@@ -19,7 +19,7 @@ class ContentStore(object):
         self.name = CONTENT_TABLE_NAME
         self.table = self.connection.table(self.name)
 
-    def append(self, url, status='OK', header=None, content=None, code='200', redirected=None):
+    def append(self, url, status='OK', header=None, content=None, code='200', redirected=False):
         '''
         ContentStore API to crawler is a simple append store. 
          * url: the url being downloaded
@@ -37,7 +37,7 @@ class ContentStore(object):
         
         ## cook the url into row-key
         ## 1. normalize the url
-        url = urlnorm(url)
+        url = urlnorm.norm(url)
 
         ## 2. row-key
         key = url2key(url)
@@ -51,14 +51,17 @@ class ContentStore(object):
         if content:
             value.update(prefix_key(COLUMN_FAMILY_PAGE, {'c':content}))
 
-        assert(status in ('OK', 'FAIL'))
+        assert(status in ('OK', 'FAILED'))
         value.update(prefix_key(COLUMN_FAMILY_META, {'status':status}))
 
         if code:
             value.update(prefix_key(COLUMN_FAMILY_META, {'code':code}))
 
-        ## TODO: redirection is not fully supported yet. 
         if redirected:
-            pass
+            ## TODO: we already have 'redirect_path' filled by downloader.
+            ##       'redirected' is redundant, but with const boolean value.
+            ##       might need to clean up later.
+            value.update(prefix_key(COLUMN_FAMILY_META, {'redirected':'T'}))
 
-        ## mfan stopped here.
+        ## store the row into hbase.
+        self.table.put(key, value)
