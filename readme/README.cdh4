@@ -1,0 +1,31 @@
+1. install oracle JDK. instruction: 
+https://ccp.cloudera.com/display/CDH4DOC/Before+You+Install+CDH4+on+a+Single+Node#BeforeYouInstallCDH4onaSingleNode-InstalltheOracleJavaDevelopmentKit
+
+https://ccp.cloudera.com/display/CDH4DOC/Before+You+Install+CDH4+on+a+Single+Node#BeforeYouInstallCDH4onaSingleNode-OracleJDKInstallation
+
+2. install CDH4 single host or cluster version
+
+3. make sure JAVA_HOME is in env_keep list in /etc/sudoers
+Defaults        env_keep += "JAVA_HOME" 
+
+4. verify it's working for single host pseudo-cluster
+https://ccp.cloudera.com/display/CDH4DOC/Installing+CDH4+on+a+Single+Linux+Node+in+Pseudo-distributed+Mode#InstallingCDH4onaSingleLinuxNodeinPseudo-distributedMode-InstallingCDH4withMRv1onaSingleLinuxNodeinPseudodistributedmode
+
+5. install HBase as a standalone or pseudo-distributed mode
+https://ccp.cloudera.com/display/CDH4DOC/HBase+Installation#HBaseInstallation-InstallingHBase
+
+Check on successful installation
+--------------------------------
+sudo jps
+ 
+ HTTP Checks
+ -----------
+ http://[hostname]:50070 /* HDFS */
+ http://[hostname]:50030 /* JobTracker */
+ http://[hostname]:50060 /* TaskTracker */
+ http://[hostname]:60010 /* HBase Master */
+ http://[hostname]:60030 /* Region Server */
+
+APPENDIX
+a good tutorial installing CDHMR2
+http://akbarahmed.com/2012/06/26/install-cloudera-cdh4-with-yarn-mrv2-in-pseudo-mode-on-ubuntu-12-04-lts/
