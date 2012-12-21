@@ -1,6 +1,8 @@
 import logging
 from time import time
 import redis
+import urlnorm
+from urls import url_fix
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -14,7 +16,7 @@ JOB_BATCH_SIZE = 300
 SITE_DEADZONE_OFFSET = 1200000000 ## move forward about 38 yrs
 SITE_DEADZONE_BORDER = 2400000000
 
-SITE_DEFAULT_QPS = 1
+SITE_DEFAULT_QPS = 1 
 
 ## 
 ## stores with fixed key name
@@ -124,6 +126,13 @@ class Job(object):
 
             ## add the batch record to DB.
             for url in batch_list:
+                try:
+                    url = url_fix(urlnorm.norm(url.strip()))
+                except urlnorm.InvalidUrl:
+                    continue
+                except UnicodeDecodeError:
+                    continue
+
                 r.rpush(batch_key, url)
 
             ##
@@ -169,14 +178,10 @@ if __name__ == "__main__":
 
     job = Job("normal", time(), "test1", "default@example.com")
 
-    job.add("www.bing.com", ["http://www.bing.com","http://www.msn.com/"])
-    job.add("www.ttmeishi.com", ["http://www.ttmeishi.com",])
-    job.add("www.facebook.com", ["http://www.facebook.com",])
-    job.add("www.yelp.com", ["http://www.yelp.com",])
-    job.add("www.mitbbs.com", ["http://www.mitbbs.com",])
-    job.add("www.patch.com", ["http://www.patch.com",])
-    job.add("www.amazon.com", ["http://www.amazon.com",])
-#    job.add("www.dajafa.com", ["http://www.dajafa.com",])
-
-    job.save()
+    import sys
+    url_filename = sys.argv[1]
+    with open(url_filename) as f:
+        urls = f.readlines()
+        job.add('www.yahoo.com', urls, qps=2)
+        job.save()
 

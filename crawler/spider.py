@@ -4,6 +4,7 @@
 from __future__ import with_statement
 import os
 import sys
+import time
 from sys import argv
 import gevent
 from gevent import socket
@@ -12,26 +13,26 @@ from gevent.event import AsyncResult
 from gevent.queue import Queue, Empty
 import commands
 
-from sched import Scheduler, SLOT_HEARTBEAT_INTERVAL
-
 from gevent import monkey
 monkey.patch_socket()
-import urllib2
-from redirect import RedirectHandler
+
+from sched import Scheduler, SLOT_HEARTBEAT_INTERVAL
 from downloader import Downloader
 
 sched = Scheduler()
 fetcher = Downloader()
 
-def download(url):
-    print 'processing %s' % url
-    result = fetcher.get(url)
-    print result
+def download(url, qps):
+    start = time.time() 
+    fetcher.get(url)
+    end = time.time()
 
-    ### 
-    ### process the downloaded data:
-    ###  * store the (http_header, data) or failure code into HBase,
-    ###  * update crawl cache.
+    ## we treat sleep_time less than 1ms as 0, just yield once.
+    sleep_time = 1.0/qps - (end - start)
+    if sleep_time < 0.1: sleep_time = 0
+
+    ## we always yield for gevent scheduling after download.
+    gevent.sleep(sleep_time)
 
 def slot(machine_id, pack_id, slot_id):
     """
@@ -42,9 +43,9 @@ def slot(machine_id, pack_id, slot_id):
     while True:
         qps, batch = sched.getBatch(slot_key)
         if batch:
-            print '+++++++++++++++++++++++++++++++++++++++++: %s : %s' % (qps, batch)
+            print '+++++++++++++++++++++++++++++++++++++++++: %s : %s of urls in batch' % (qps, len(batch))
             for url in batch:
-                download(url)
+                download(url, qps)
             sched.ackBatch(slot_key)
         else:
             gevent.sleep(3)
@@ -69,7 +70,12 @@ def main():
     pool = Pool(MAX_WORKER+1)
 
     ## machine id
-    ip = commands.getoutput("ifconfig").split("\n")[1].split()[1].split(':')[1]
+    lines = commands.getoutput("ifconfig").split("\n")
+    inets = [line for line in lines if line.strip().startswith('inet')]
+    ip = None
+    for i in inets:
+        ip = i.split()[1].split(':')[1]
+        if ip: break
     if not ip:
         raise "Need to get IP address as machine Id!"
 

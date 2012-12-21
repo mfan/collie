@@ -214,12 +214,12 @@ class Scheduler(object):
             ret = r.pipeline()                              \
                 .zadd(idle_slot_key, slot, score)           \
                 .lpush(list_key, batch)                     \
-                .hincrby(host_key, 'qps', SITE_DEFAULT_QPS) \
+                .hincrbyfloat(host_key, 'qps', SITE_DEFAULT_QPS) \
                 .hdel(schedule_slot_key, slot)              \
                 .execute()
 
             ## move the host out of DEADZONE if its qps is 0 or below.
-            qps = int(r.hget(host_key, 'qps'))
+            qps = float(r.hget(host_key, 'qps'))
             if qps <= SITE_DEFAULT_QPS:
                 ## bring the host out of DEADZONE
                 r.zincrby(host_list_key, host_key, 0 - SITE_DEADZONE_OFFSET)
@@ -264,12 +264,12 @@ class Scheduler(object):
             ret = r.pipeline()                              \
                 .zadd(idle_slot_key, slot, score)           \
                 .lpush(list_key, batch)                     \
-                .hincrby(host_key, 'qps', SITE_DEFAULT_QPS) \
+                .hincrbyfloat(host_key, 'qps', SITE_DEFAULT_QPS) \
                 .hdel(crawl_slot_key, slot)                 \
                 .execute()
 
             ## move the host out of DEADZONE if its qps is 0 or below.
-            qps = int(r.hget(host_key, 'qps'))
+            qps = float(r.hget(host_key, 'qps'))
             if qps <= SITE_DEFAULT_QPS:
                 ## bring the host out of DEADZONE
                 r.zincrby(host_list_key, host_key, 0 - SITE_DEADZONE_OFFSET)
@@ -322,7 +322,7 @@ class Scheduler(object):
             .execute()
 
         logger.debug("getBatch(slot=%s): exit: got a batch(%s) with % urls." % (slot, batch, count))
-        return (int(qps), urls)
+        return (float(qps), urls)
 
 
     def ackBatch(self, slot):
@@ -374,14 +374,14 @@ class Scheduler(object):
             .hdel(crawl_slot_key, slot)                 \
             .hdel(crawl_batch_key, batch_record)        \
             .zadd(idle_slot_key, slot, score)           \
-            .hincrby(host_key, 'qps', SITE_DEFAULT_QPS) \
+            .hincrbyfloat(host_key, 'qps', SITE_DEFAULT_QPS) \
             .execute()
 
         ## move the host out of DEADZONE if its qps is 0 or below.
         ## TODO: this operation either requires lock, or
         ##       correction in _schedule() to fix the host score in host_list.
         ##  
-        qps = int(r.hget(host_key, 'qps'))
+        qps = float(r.hget(host_key, 'qps'))
         if qps <= SITE_DEFAULT_QPS:
             ## bring the host out of DEADZONE
             r.zincrby(host_list_key, host_key, 0 - SITE_DEADZONE_OFFSET)
@@ -393,7 +393,11 @@ class Scheduler(object):
 
     def _schedule(self):
 
-        if not self.enabled: return
+        if not self.enabled:
+            if self.status() == SCHED_STATE_RUNNING:
+                self.enabled = True
+            else:
+                return
 
         ##
         ## try to grab the lock to do the scheduling
@@ -451,7 +455,7 @@ class Scheduler(object):
             host = r.hgetall(host_key)
             logger.debug("_schedule(): processing host=(%s: %s), detailed info: \n%s" % (host_key, score, host))
 
-            qps = int(host['qps'])
+            qps = float(host['qps'])
 
             if qps <= 0:
                 ## the host has no qps left, not in DEADZONE yet
@@ -464,7 +468,7 @@ class Scheduler(object):
             high_list_key = "%s:pending:high" % host_key
             normal_list_key = "%s:pending:normal" % host_key
 
-            num_batch = min(math.ceil(qps / SITE_DEFAULT_QPS), avail_slots)
+            num_batch = min(int(math.ceil(qps / SITE_DEFAULT_QPS)), avail_slots)
             batches = r.lrange(high_list_key, 0, num_batch-1)
             num_high = len(batches)
             logger.info("_schedule(): get %s batches for host (%s: %s) from HIGH queue" % (num_high, host_key, score))
@@ -494,7 +498,7 @@ class Scheduler(object):
                     batch_qps = qps
                 else:
                     batch_qps = SITE_DEFAULT_QPS
-                ## always subtract default value, so for none integral 
+                ## always subtract default value, so for smaller
                 ## qps we can recover them through add back the default
                 ## value.
                 qps = qps - SITE_DEFAULT_QPS
@@ -722,11 +726,11 @@ class Scheduler(object):
                 ## 2. recover the host's QPS
                 ## 3. remove slot from scheduling slot table
                 pipe.lpush(list_key, batch)
-                pipe.hincrby(host_key, 'qps', SITE_DEFAULT_QPS)
+                pipe.hincrbyfloat(host_key, 'qps', SITE_DEFAULT_QPS)
                 pipe.hdel(schedule_slot_key, slot)
 
                 ## move the host out of DEADZONE if its qps is 0 or below.
-                qps = int(r.hget(host_key, 'qps'))
+                qps = float(r.hget(host_key, 'qps'))
                 if qps <= SITE_DEFAULT_QPS:
                     ## bring the host out of DEADZONE
                     pipe.zincrby(host_list_key, host_key, 0 - SITE_DEADZONE_OFFSET)
@@ -757,11 +761,11 @@ class Scheduler(object):
                     ## 4. remove slot from crawling slot table
                     ##    crawling batch table is already clean up.
                     pipe.lpush(list_key, batch)
-                    pipe.hincrby(host_key, 'qps', SITE_DEFAULT_QPS)
+                    pipe.hincrbyfloat(host_key, 'qps', SITE_DEFAULT_QPS)
                     pipe.hdel(crawl_slot_key, slot)
 
                     ## move the host out of DEADZONE if its qps is 0 or below.
-                    qps = int(r.hget(host_key, 'qps'))
+                    qps = float(r.hget(host_key, 'qps'))
                     if qps <= SITE_DEFAULT_QPS:
                         ## bring the host out of DEADZONE
                         r.zincrby(host_list_key, host_key, 0 - SITE_DEADZONE_OFFSET)

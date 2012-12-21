@@ -1,5 +1,5 @@
+import time
 import happybase
-import urlnorm
 from utils import url2key
 
 CONTENT_TABLE_NAME = 'web'
@@ -19,49 +19,30 @@ class ContentStore(object):
         self.name = CONTENT_TABLE_NAME
         self.table = self.connection.table(self.name)
 
-    def append(self, url, status='OK', header=None, content=None, code='200', redirected=False):
+    def append(self, url, header=None, content=None, redirected=False):
         '''
         ContentStore API to crawler is a simple append store. 
          * url: the url being downloaded
          * status: 'OK', or 'FAIL'
-         * header: HTTP headers, a dictionary, preferable from urllib2.addinfourl.dict
+         * header: HTTP headers, a dictionary, with 'redirect_path'
          * content: page content
          * code: HTTP codes, e.g. 200, 404, etc.
-         * redirected: if redirected, it's a list of string '30x [space] url', for example: 
-         *   ('301 http://example.com/redirected1', '302 http://example.com/redirected2', ...)
-         *   redirections will be stored as 
-         *     field: 'h:RedirectionPath'
-         *     value: '\t'.join(redirected)
-         *   for processing, two-level split using '\t' and ' ' shall work.
         '''
         
         ## cook the url into row-key
-        ## 1. normalize the url
-        url = urlnorm.norm(url)
-
-        ## 2. row-key
         key = url2key(url)
 
-        ## 3. row-data
+        ## prepare row-data
         value = {}
 
         if header:
             value.update(prefix_key(COLUMN_FAMILY_META, header)) 
+        if 'redirect_path' in header:
+            value.update(prefix_key(COLUMN_FAMILY_META, {'redirected':'T'}))
 
         if content:
             value.update(prefix_key(COLUMN_FAMILY_PAGE, {'c':content}))
 
-        assert(status in ('OK', 'FAILED'))
-        value.update(prefix_key(COLUMN_FAMILY_META, {'status':status}))
-
-        if code:
-            value.update(prefix_key(COLUMN_FAMILY_META, {'code':code}))
-
-        if redirected:
-            ## TODO: we already have 'redirect_path' filled by downloader.
-            ##       'redirected' is redundant, but with const boolean value.
-            ##       might need to clean up later.
-            value.update(prefix_key(COLUMN_FAMILY_META, {'redirected':'T'}))
-
         ## store the row into hbase.
+        print "===== %s", time.time()
         self.table.put(key, value)
