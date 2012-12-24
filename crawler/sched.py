@@ -97,7 +97,6 @@ slot_table_key = "slot:list"
 idle_slot_key = "slot:idlelist"
 
 host_list_key = "host:list"
-mach_list_key = "machine:list"
 
 lock_key = "scheduling:lock"
 
@@ -191,8 +190,8 @@ class Scheduler(object):
         ##
         slot_dict = r.hgetall(schedule_slot_key)
         for slot, record in slot_dict.iteritems():
-            prefix, machine, pack, fetcher = slot.split(':')
-            if not prefix or not machine or not pack or not fetcher:
+            prefix, machine, pack, spider = slot.split(':')
+            if not prefix or not machine or not pack or not spider:
                 raise InternalError("corrupted slot data (slot:%s=>batch:%s) in %s" % (slot, batch, schedule_slot_key))
 
             batch, qps, list_key = record.split('|')
@@ -204,7 +203,7 @@ class Scheduler(object):
                 raise InternalError("corrupted batch record(slot:%s=>batch:%s) in %s" % (slot, batch, schedule_slot_key))
             host_key = "host:%s" % hostname
 
-            score = pack * 100 + fetcher
+            score = pack * 100 + spider
             ##
             ## update the job store and schedule store
             ## 1. add slot back into idle slot list
@@ -234,8 +233,8 @@ class Scheduler(object):
             if not slot or not batch_record:
                 raise InternalError("corrupted record for slot(%s) in table %s" % (slot, crawl_slot_key))
 
-            prefix, machine, pack, fetcher = slot.split(':')
-            if not prefix or not machine or not pack or not fetcher:
+            prefix, machine, pack, spider = slot.split(':')
+            if not prefix or not machine or not pack or not spider:
                 raise InternalError("corrupted slot data (slot:%s=>batch:%s) in %s" % (slot, batch, schedule_slot_key))
 
             batch, qps, list_key = batch_record.split('|')
@@ -252,7 +251,7 @@ class Scheduler(object):
                 raise InternalError("corrupted batch record(slot:%s=>batch:%s) in %s" % (slot, batch, schedule_slot_key))
             host_key = "host:%s" % hostname
 
-            score = pack * 100 + fetcher
+            score = pack * 100 + spider
 
             ##
             ## update the job store and schedule store
@@ -325,14 +324,14 @@ class Scheduler(object):
         return (float(qps), urls)
 
 
-    def ackBatch(self, slot):
+    def ackBatch(self, slot, aborted=False):
         ## check if scheduler is stopped.
         state = int(r.get(schedule_state_key))
         if not state or int(state) == SCHED_STATE_INIT: return 'init'
         if int(state) == SCHED_STATE_STOPPED: return 'stopped'
 
         slot = slot.strip().lower()
-        logger.debug("ackBatch(slot=%s)" % slot)
+        logger.debug("ackBatch(slot=%s, aborted=%s)" % (slot, aborted))
 
         ## report slot alive (update slot table with latest time)
         r.zadd(slot_table_key, slot, time())
@@ -358,24 +357,27 @@ class Scheduler(object):
         host_key = "host:%s" % hostname
         host_complete_list_key = "host:%s:completed" % hostname
 
-        prefix, machine, pack, fetcher = slot.split(':')
+        prefix, machine, pack, spider = slot.split(':')
         if not prefix or not hostname or not remains:
             raise InternalError("corrupted batch record(slot:%s=>batch:%s) in %s" % (slot, batch, schedule_slot_key))
 
-        score = pack * 100 + fetcher
+        score = pack * 100 + spider
 
         ## release the resource
         ##  1. add the batch into completed batch list.
         ##  2. remove the entry from both crawling:slots and crawling:batches list
         ##  3. add the slot into idle slot list
         ##  4. recover QPS for the host
-        ret = r.pipeline()                              \
-            .rpush(host_complete_list_key, batch)       \
-            .hdel(crawl_slot_key, slot)                 \
-            .hdel(crawl_batch_key, batch_record)        \
-            .zadd(idle_slot_key, slot, score)           \
-            .hincrbyfloat(host_key, 'qps', SITE_DEFAULT_QPS) \
-            .execute()
+        with r.pipeline() as p:
+            if aborted:
+                p.rpush(list_key, batch)
+            else:
+                p.rpush(host_complete_list_key, batch)
+            p.hdel(crawl_slot_key, slot)
+            p.hdel(crawl_batch_key, batch_record)
+            p.zadd(idle_slot_key, slot, score)
+            p.hincrbyfloat(host_key, 'qps', SITE_DEFAULT_QPS)
+            p.execute()
 
         ## move the host out of DEADZONE if its qps is 0 or below.
         ## TODO: this operation either requires lock, or
@@ -543,113 +545,24 @@ class Scheduler(object):
 
         logger.debug("_schedule(): exit: no more idle slots.")
 
-    def _validate(self, **kw):
-        if 'ip' not in kw or        \
-                'external_ip' not in kw or \
-                'name' not in kw or \
-                'external_name' not in kw or \
-                'num_pack' not in kw or \
-                'num_slot' not in kw:
-            raise MachineInvalidConfig("Invalid machine configuration!!!")
-
-        mach_dict = kw;
-        if 'enabled' not in mach_dict or \
-                mach_dict['enabled'] != True:
-            mach_dict['enabled'] = False
-
-        return mach_dict
-
-    ## add or update a machine info
-    def addMachine(self, **kw):
-        mach_dict = self._validate(**kw)
-        ip = mach_dict['ip']
-        mach_table_key = "machine:%s" % ip
-
-        ##  update schedule store.
-        ##  1. creat an entry in machine_tables
-        ##  2. add into machine list
-        r.pipeline()                                    \
-                .hmset(mach_table_key, mach_dict)       \
-                .sadd(mach_list_key, mach_table_key)    \
-                .execute()
-
-    ## info about a machine
-    def machine(self, ip):
-        mach_table_key = "machine:%s" % ip
-
-        if not r.exists(mach_table_key):
-            raise MachineDoesntExist("No such machine configured with IP = %s!!!" % ip)
-
-        return r.hgetall(mach_table_key)
-
-    def enableMachine(self, ip):
-        mach_table_key = "machine:%s" % ip
-
-        if not r.exists(mach_table_key):
-            raise MachineDoesntExist("No such machine configured with IP = %s!!!" % ip)
-
-        r.hset(mach_table_key, 'enabled', True)
-
-    ## TODO: disable machine requires further work to stop current working slots!!!
-    def disableMachine(self, ip):
-        mach_table_key = "machine:%s" % ip
-
-        if not r.exists(mach_table_key):
-            raise MachineDoesntExist("No such machine configured with IP = %s!!!" % ip)
-
-        r.hset(mach_table_key, 'enabled', False)
-
-    def machineEnabled(self, ip):
-        mach_table_key = "machine:%s" % ip
-
-        if not r.exists(mach_table_key):
-            raise MachineDoesntExist("No such machine configured with IP = %s!!!" % ip)
-
-        return r.hget(mach_table_key, 'enabled')
-
-    def _updateSlots(self, slot_list, idle=True):
-        norm_slot_list = [] 
-        machine_id = pack_id = 0
-        for slot in slot_list:
-            slot = slot.strip().lower()
-            prefix, ip, pack, fetcher = slot.split(':')
-            pack = int(pack)
-            fetcher = int(fetcher)
-            if (prefix != 'slot'):
-                raise SlotInvalidConfig("Invalid slot Id: %s!!!" % slot)
-
-            # reduce the roundtrip checking with redis store.
-            if ip != machine_id or pack != pack_id:
-                if not self.machineEnabled(ip):
-                    return False
-
-                mach_dict = self.machine(ip)
-
-                ## validate pack index and fetcher index.
-                if not (0 < pack <= mach_dict['num_pack']) or not (0 < fetcher <= mach_dict['num_slot']):
-                    raise SlotInvalidConfig("Invalid slot Id: %s!!!" % slot)
-
-                machine_id = ip
-                pack_id = pack
-
-            norm_slot_list.append(slot)
-
+    def _updateSlots(self, slot_list, new=True):
         ## update store in batch using pipeline
         pipe = r.pipeline()
         now = time()
-        for slot in norm_slot_list:
+        for slot in slot_list:
             pipe.zadd(slot_table_key, slot, now)
-            if idle:
-                pipe.zadd(idle_slot_key, slot, pack * 100 + fetcher)
+            if new:
+                prefix, machine, pack, spider = slot.split(':')
+                pipe.zadd(idle_slot_key, slot, pack * 100 + spider)
         pipe.execute()
 
         return True
 
     def addSlots(self, slot_list):
-        return self._updateSlots(slot_list, idle=True)
+        return self._updateSlots(slot_list, new=True)
 
     def reportSlots(self, slot_list):
-        return self._updateSlots(slot_list, idle=False)
+        return self._updateSlots(slot_list, new=False)
 
     ##
     ## delete slots from scheduler
@@ -667,45 +580,19 @@ class Scheduler(object):
 
         unlock(lock_key, lock_value)
 
-    ##
-    ## delete a list of slots from schedule
-    ##  o might need to freeze all operation.
-    ##  o check and rollback all crawling batches into host batch list.
-    ##     o need to tell if a batch is from high or normal priority list.
-    ##  o remove slot from slot table and idle slot table.
-    ##
+
     def _delete_slots(self, slot_list):
-
-        norm_slot_list = [] 
-        machine_id = pack_id = 0
-        for slot in slot_list:
-            slot = slot.strip().lower()
-            prefix, ip, pack, fetcher = slot.split(':')
-            pack = int(pack)
-            fetcher = int(fetcher)
-            if (prefix != 'slot'):
-                raise SlotInvalidConfig("Invalid slot Id: %s!!!" % slot)
-
-            # reduce the roundtrip checking with redis store.
-            if ip != machine_id or pack != pack_id:
-                if not self.machineEnabled(ip):
-                    return False
-
-                mach_dict = self.machine(ip)
-
-                ## validate pack index and fetcher index.
-                if not (0 < pack <= mach_dict['num_pack']) or not (0 < fetcher <= mach_dict['num_slot']):
-                    raise SlotInvalidConfig("Invalid slot Id: %s!!!" % slot)
-
-                machine_id = ip
-                pack_id = pack
-
-            norm_slot_list.append(slot)
-
+        '''
+        delete a list of slots from schedule
+         o might need to freeze all operation.
+         o check and rollback all crawling batches into host batch list.
+            o need to tell if a batch is from high or normal priority list.
+         o remove slot from slot table and idle slot table.
+        '''
         pipe = r.pipeline()
-        for slot in norm_slot_list:
-            prefix, machine, pack, fetcher = slot.split(':')
-            if not prefix or not machine or not pack or not fetcher:
+        for slot in slot_list:
+            prefix, machine, pack, spider = slot.split(':')
+            if not prefix or not machine or not pack or not spider:
                 raise InternalError("corrupted slot data (slot:%s=>batch:%s) in %s" % (slot, batch, schedule_slot_key))
 
             record = r.hget(schedule_slot_key, slot)
@@ -781,8 +668,9 @@ class Scheduler(object):
 
 if __name__ == "__main__":
     sched = Scheduler()
+    sched.restart()
 
     while 1:
         sched._schedule()
-        sleep(5)
+        sleep(10)
 
