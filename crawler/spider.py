@@ -12,8 +12,6 @@ from gevent.pool import Pool
 from gevent.event import AsyncResult
 from gevent.queue import Queue, Empty
 
-import commands
-
 from gevent import monkey
 monkey.patch_socket()
 
@@ -130,12 +128,8 @@ if __name__ == "__main__":
         sys.exit(-1)
 
     ## machine id
-    lines = commands.getoutput("ifconfig").split("\n")
-    inets = [line for line in lines if line.strip().startswith('inet')]
-    ip = None
-    for i in inets:
-        ip = i.split()[1].split(':')[1]
-        if ip: break
+    import socket
+    ip = socket.gethostbyname(socket.gethostname())
     if not ip:
         raise "Need to get IP address as machine Id!"
 
