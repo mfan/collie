@@ -3,11 +3,13 @@ import urllib2
 
 class RedirectHandler(urllib2.HTTPRedirectHandler):
     def http_error_301(self, req, fp, code, msg, headers):
+        newurl = headers.dict['location']
+        redirect_path = [(code, newurl)]
+        print "code: %s, headers ==> %s" % (code, newurl,)
+
         result = urllib2.HTTPRedirectHandler.http_error_301( 
             self, req, fp, code, msg, headers)
 
-        newurl = headers.dict['location']
-        redirect_path = [(code, newurl)]
         if hasattr(result, 'redirect_path'):
             result.redirect_path.insert(0, redirect_path)
         else:
@@ -23,7 +25,7 @@ class RedirectHandler(urllib2.HTTPRedirectHandler):
 if __name__ == "__main__":
     opener = urllib2.build_opener(RedirectHandler)
     urllib2.install_opener(opener)
-    urls = ['http://www.facebook.com', 'http://www.msn.com', 'http://gmail.com/']
+    urls = ['http://www.dajafa.com']
     for url in urls:
         try:
             f = urllib2.urlopen(url)
