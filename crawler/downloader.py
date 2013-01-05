@@ -78,5 +78,5 @@ if __name__ == "__main__":
     c = ContentStore()
     cache = CrawlCache(r)
     dl = Downloader(c, cache)
-    start_time, end_time = dl.get("http://mail.google.com/")
+    start_time, end_time, ok = dl.get("http://gmail.com/")
     print "download takes %s seconds." % (end_time - start_time)
