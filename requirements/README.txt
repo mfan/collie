@@ -5,7 +5,7 @@
 
 2. install python packages needed.
 
- pip install --no-deps --requirement requirements/dajafa.txt
+ pip install --no-deps --requirement requirements/collie.txt
 
 ----------------------------------------------------------------------
 o generate the package list.
